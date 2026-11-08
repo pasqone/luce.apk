@@ -87,3 +87,10 @@ The compiled APK will be generated at:
 - **Minimum SDK:** Android 8.0 (API level 26)
 - **Target / Compile SDK:** Android 14 (API level 34)
 - **State Persistence:** Android `SharedPreferences` for brightness, hue, saturation, presets, and lock state.
+
+---
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0** (GPL-3.0).  
+See the [LICENSE](LICENSE) file for the full license text.
