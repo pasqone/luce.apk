@@ -300,7 +300,7 @@ fun LuceApp(
                     onDoubleTap = {
                         if (isModeB) {
                             toggleModeB()
-                        } else if (!isLocked && !showColorPicker) {
+                        } else if (!showColorPicker) {
                             toggleModeB()
                         }
                     }
@@ -394,7 +394,7 @@ fun LuceApp(
                     Icon(
                         imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.LockOpen,
                         contentDescription = if (isLocked) "Unlock" else "Lock",
-                        tint = if (isLocked) Color(0xFFFF8A80) else Color.White,
+                        tint = Color.White,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -415,6 +415,7 @@ fun LuceApp(
                     ColorPickerCard(
                         hue = hue,
                         saturation = saturation,
+                        brightness = brightness,
                         presets = presets,
                         savedPresetIndex = savedPresetIndex,
                         onHueChange = { newHue ->
@@ -424,6 +425,11 @@ fun LuceApp(
                         onSaturationChange = { newSat ->
                             saturation = newSat
                             prefs.edit().putFloat("current_saturation", newSat).apply()
+                        },
+                        onBrightnessChange = { newBrightness ->
+                            brightness = newBrightness
+                            onBrightnessChange(newBrightness)
+                            prefs.edit().putFloat("current_brightness", newBrightness).apply()
                         },
                         onSelectPreset = { idx -> applyPreset(idx) },
                         onSavePreset = { idx -> savePreset(idx) }
@@ -465,10 +471,12 @@ fun LuceApp(
 fun ColorPickerCard(
     hue: Float,
     saturation: Float,
+    brightness: Float,
     presets: List<ColorPreset>,
     savedPresetIndex: Int,
     onHueChange: (Float) -> Unit,
     onSaturationChange: (Float) -> Unit,
+    onBrightnessChange: (Float) -> Unit,
     onSelectPreset: (Int) -> Unit,
     onSavePreset: (Int) -> Unit
 ) {
@@ -495,6 +503,15 @@ fun ColorPickerCard(
         )
     }
 
+    val brightnessBrush = remember(hue, saturation) {
+        Brush.horizontalGradient(
+            listOf(
+                Color.Black,
+                Color.hsv(hue, saturation, 1.0f)
+            )
+        )
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -510,7 +527,7 @@ fun ColorPickerCard(
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // Slider 1: Hue (0f..360f)
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -602,6 +619,51 @@ fun ColorPickerCard(
                 )
             }
 
+            // Slider 3: Brightness (0.01f..1.0f)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Brightness",
+                        color = Color(0xFFDDDDDD),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "${(brightness * 100).roundToInt()}%",
+                        color = Color(0xFFAAAAAA),
+                        fontSize = 13.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Slider(
+                    value = brightness,
+                    onValueChange = onBrightnessChange,
+                    valueRange = 0.01f..1.0f,
+                    modifier = Modifier.fillMaxWidth(),
+                    track = {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(12.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(brightnessBrush)
+                        )
+                    },
+                    thumb = {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .background(Color.White)
+                                .border(2.dp, Color(0xFF222222), CircleShape)
+                        )
+                    }
+                )
+            }
+
             // 4 Presets Row
             Row(
                 modifier = Modifier
@@ -643,7 +705,7 @@ fun ColorPickerCard(
 
 @Composable
 fun HardwareTorchCenterGraphic() {
-    Canvas(modifier = Modifier.size(170.dp)) {
+    Canvas(modifier = Modifier.size(240.dp)) {
         val gray = Color(0xFF4D4D4D)
         val w = size.width
         val h = size.height
@@ -654,7 +716,7 @@ fun HardwareTorchCenterGraphic() {
             color = gray,
             start = Offset(w * 0.5f, h * 0.30f),
             end = Offset(w * 0.5f, h * 0.05f),
-            strokeWidth = 4.dp.toPx(),
+            strokeWidth = 5.dp.toPx(),
             cap = StrokeCap.Round
         )
         // Inner left diagonal ray
@@ -662,7 +724,7 @@ fun HardwareTorchCenterGraphic() {
             color = gray,
             start = Offset(w * 0.44f, h * 0.32f),
             end = Offset(w * 0.26f, h * 0.12f),
-            strokeWidth = 4.dp.toPx(),
+            strokeWidth = 5.dp.toPx(),
             cap = StrokeCap.Round
         )
         // Inner right diagonal ray
@@ -670,7 +732,7 @@ fun HardwareTorchCenterGraphic() {
             color = gray,
             start = Offset(w * 0.56f, h * 0.32f),
             end = Offset(w * 0.74f, h * 0.12f),
-            strokeWidth = 4.dp.toPx(),
+            strokeWidth = 5.dp.toPx(),
             cap = StrokeCap.Round
         )
         // Outer left ray
@@ -678,7 +740,7 @@ fun HardwareTorchCenterGraphic() {
             color = gray,
             start = Offset(w * 0.38f, h * 0.35f),
             end = Offset(w * 0.14f, h * 0.24f),
-            strokeWidth = 4.dp.toPx(),
+            strokeWidth = 5.dp.toPx(),
             cap = StrokeCap.Round
         )
         // Outer right ray
@@ -686,7 +748,7 @@ fun HardwareTorchCenterGraphic() {
             color = gray,
             start = Offset(w * 0.62f, h * 0.35f),
             end = Offset(w * 0.86f, h * 0.24f),
-            strokeWidth = 4.dp.toPx(),
+            strokeWidth = 5.dp.toPx(),
             cap = StrokeCap.Round
         )
 
@@ -705,7 +767,7 @@ fun HardwareTorchCenterGraphic() {
             color = gray,
             topLeft = Offset(w * 0.42f, h * 0.54f),
             size = Size(w * 0.16f, h * 0.32f),
-            cornerRadius = CornerRadius(6.dp.toPx())
+            cornerRadius = CornerRadius(8.dp.toPx())
         )
 
         // Flashlight Base / Tailcap
@@ -713,7 +775,7 @@ fun HardwareTorchCenterGraphic() {
             color = gray,
             topLeft = Offset(w * 0.40f, h * 0.85f),
             size = Size(w * 0.20f, h * 0.04f),
-            cornerRadius = CornerRadius(3.dp.toPx())
+            cornerRadius = CornerRadius(4.dp.toPx())
         )
     }
 }
