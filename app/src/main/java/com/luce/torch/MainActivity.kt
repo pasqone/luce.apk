@@ -16,6 +16,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -76,6 +77,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -120,6 +122,12 @@ class MainActivity : ComponentActivity() {
                         setTorch(false)
                         applyScreenBrightness(lastDisplayBrightness)
                     }
+                },
+                onSetTorch = { enabled ->
+                    setTorch(enabled)
+                },
+                onApplyBrightness = { b ->
+                    applyScreenBrightness(b)
                 }
             )
         }
@@ -196,7 +204,9 @@ class MainActivity : ComponentActivity() {
 fun LuceApp(
     prefs: SharedPreferences,
     onBrightnessChange: (Float) -> Unit,
-    onModeBChange: (Boolean) -> Unit
+    onModeBChange: (Boolean) -> Unit,
+    onSetTorch: (Boolean) -> Unit,
+    onApplyBrightness: (Float) -> Unit
 ) {
     // Mode A vs Mode B (always starts in Mode A per SPEC)
     var isModeB by remember { mutableStateOf(false) }
@@ -206,6 +216,10 @@ fun LuceApp(
     var saturation by remember { mutableFloatStateOf(prefs.getFloat("current_saturation", 0.0f)) }
     var brightness by remember { mutableFloatStateOf(prefs.getFloat("current_brightness", 0.8f).coerceIn(0.01f, 1.0f)) }
     var isLocked by remember { mutableStateOf(prefs.getBoolean("is_locked", false)) }
+
+    // SOS State
+    var isSosActive by remember { mutableStateOf(false) }
+    var isSosFlashOn by remember { mutableStateOf(false) }
 
     // Color picker visibility
     var showColorPicker by remember { mutableStateOf(false) }
@@ -245,6 +259,47 @@ fun LuceApp(
         LocalConfiguration.current.screenHeightDp.dp.toPx()
     }
 
+    // Standard Morse SOS sequence (... --- ...)
+    val sosSequence = remember {
+        listOf(
+            // S: ...
+            true to 200L, false to 200L,
+            true to 200L, false to 200L,
+            true to 200L, false to 600L,
+            // O: ---
+            true to 600L, false to 200L,
+            true to 600L, false to 200L,
+            true to 600L, false to 600L,
+            // S: ...
+            true to 200L, false to 200L,
+            true to 200L, false to 200L,
+            true to 200L, false to 1400L
+        )
+    }
+
+    LaunchedEffect(isSosActive) {
+        if (!isSosActive) {
+            isSosFlashOn = false
+            onSetTorch(isModeB)
+            onApplyBrightness(if (isModeB) 0.01f else brightness)
+            return@LaunchedEffect
+        }
+        onApplyBrightness(1.0f)
+        try {
+            while (isActive) {
+                for ((flashOn, duration) in sosSequence) {
+                    isSosFlashOn = flashOn
+                    onSetTorch(flashOn)
+                    delay(duration)
+                }
+            }
+        } finally {
+            isSosFlashOn = false
+            onSetTorch(isModeB)
+            onApplyBrightness(if (isModeB) 0.01f else brightness)
+        }
+    }
+
     fun savePreset(index: Int) {
         presets[index] = ColorPreset(hue, saturation)
         prefs.edit()
@@ -272,6 +327,9 @@ fun LuceApp(
     }
 
     fun toggleModeB() {
+        if (isSosActive) {
+            isSosActive = false
+        }
         val next = !isModeB
         isModeB = next
         if (next) {
@@ -280,7 +338,17 @@ fun LuceApp(
         onModeBChange(next)
     }
 
-    val backgroundColor = if (isModeB) {
+    fun toggleSos() {
+        val next = !isSosActive
+        isSosActive = next
+        if (next) {
+            showColorPicker = false
+        }
+    }
+
+    val backgroundColor = if (isSosActive) {
+        if (isSosFlashOn) Color(0xFF0055FF) else Color.Black
+    } else if (isModeB) {
         Color.Black
     } else {
         Color.hsv(hue, saturation, 1.0f)
@@ -290,7 +358,7 @@ fun LuceApp(
         modifier = Modifier
             .fillMaxSize()
             .background(backgroundColor)
-            .pointerInput(isLocked, isModeB, showColorPicker) {
+            .pointerInput(isLocked, isModeB, isSosActive, showColorPicker) {
                 detectTapGestures(
                     onTap = {
                         if (showColorPicker) {
@@ -298,7 +366,9 @@ fun LuceApp(
                         }
                     },
                     onDoubleTap = {
-                        if (isModeB) {
+                        if (isSosActive) {
+                            isSosActive = false
+                        } else if (isModeB) {
                             toggleModeB()
                         } else if (!showColorPicker) {
                             toggleModeB()
@@ -306,8 +376,8 @@ fun LuceApp(
                     }
                 )
             }
-            .pointerInput(isLocked, isModeB) {
-                if (isLocked || isModeB) return@pointerInput
+            .pointerInput(isLocked, isModeB, isSosActive) {
+                if (isLocked || isModeB || isSosActive) return@pointerInput
                 detectVerticalDragGestures(
                     onDragStart = {
                         isDraggingBrightness = true
@@ -336,7 +406,7 @@ fun LuceApp(
                 )
             }
     ) {
-        if (isModeB) {
+        if (isModeB && !isSosActive) {
             // Mode B: Hardware LED active, screen black, 30% gray torch graphic
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -344,7 +414,7 @@ fun LuceApp(
             ) {
                 HardwareTorchCenterGraphic()
             }
-        } else {
+        } else if (!isModeB && !isSosActive) {
             // Mode A: Display Light Mode
 
             // Center brightness percentage indicator while dragging
@@ -366,36 +436,6 @@ fun LuceApp(
                         color = Color.White,
                         fontSize = 32.sp,
                         fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            // Lock Icon (Top-End)
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 44.dp, end = 20.dp)
-            ) {
-                IconButton(
-                    onClick = {
-                        val nextLock = !isLocked
-                        isLocked = nextLock
-                        prefs.edit().putBoolean("is_locked", nextLock).apply()
-                        if (nextLock) {
-                            showColorPicker = false
-                        }
-                    },
-                    modifier = Modifier
-                        .size(46.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.35f))
-                        .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.LockOpen,
-                        contentDescription = if (isLocked) "Unlock" else "Lock",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
@@ -461,6 +501,69 @@ fun LuceApp(
                         }
                     }
                 }
+            }
+        }
+
+        // SOS Button (Top-Start / oben links)
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 44.dp, start = 20.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isSosActive) Color(0xFFD32F2F) else Color.Black.copy(alpha = 0.35f)
+                    )
+                    .border(
+                        1.dp,
+                        if (isSosActive) Color.Red else Color.White.copy(alpha = 0.25f),
+                        CircleShape
+                    )
+                    .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        toggleSos()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "SOS",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        // Lock Icon (Bottom-Start / unten links)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(bottom = 36.dp, start = 20.dp)
+        ) {
+            IconButton(
+                onClick = {
+                    val nextLock = !isLocked
+                    isLocked = nextLock
+                    prefs.edit().putBoolean("is_locked", nextLock).apply()
+                    if (nextLock) {
+                        showColorPicker = false
+                    }
+                },
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.35f))
+                    .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
+            ) {
+                Icon(
+                    imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                    contentDescription = if (isLocked) "Unlock" else "Lock",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
             }
         }
     }
