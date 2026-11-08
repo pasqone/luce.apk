@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -142,7 +143,7 @@ class MainActivity : ComponentActivity() {
 
     private fun applyScreenBrightness(brightness: Float) {
         val lp = window.attributes
-        lp.screenBrightness = brightness.coerceIn(0.01f, 1.0f)
+        lp.screenBrightness = brightness.coerceIn(0.001f, 1.0f)
         window.attributes = lp
     }
 
@@ -346,12 +347,20 @@ fun LuceApp(
         }
     }
 
+    // Below 30%, smoothly dim the pixel value down to 0.08f at 1% for ultra-dim night light
+    val colorValue = if (brightness < 0.30f) {
+        val t = ((brightness - 0.01f) / (0.30f - 0.01f)).coerceIn(0.0f, 1.0f)
+        0.08f + 0.92f * t
+    } else {
+        1.0f
+    }
+
     val backgroundColor = if (isSosActive) {
         if (isSosFlashOn) Color(0xFF0055FF) else Color.Black
     } else if (isModeB) {
         Color.Black
     } else {
-        Color.hsv(hue, saturation, 1.0f)
+        Color.hsv(hue, saturation, colorValue)
     }
 
     Box(
@@ -396,7 +405,13 @@ fun LuceApp(
                     onVerticalDrag = { _, dragAmount ->
                         // Upwards drag is negative in y-axis -> increases brightness
                         val sensitivity = 0.70f * screenHeightPx
-                        val delta = -dragAmount / sensitivity
+                        // Fine-grained control in the low brightness range (1% to 25%)
+                        val precisionScale = if (brightness < 0.25f) {
+                            0.30f + (brightness / 0.25f) * 0.70f
+                        } else {
+                            1.0f
+                        }
+                        val delta = (-dragAmount / sensitivity) * precisionScale
                         val newBrightness = (brightness + delta).coerceIn(0.01f, 1.0f)
                         brightness = newBrightness
                         onBrightnessChange(newBrightness)
@@ -417,12 +432,14 @@ fun LuceApp(
         } else if (!isModeB && !isSosActive) {
             // Mode A: Display Light Mode
 
-            // Center brightness percentage indicator while dragging
+            // Brightness percentage indicator while dragging (lifted above finger area)
             AnimatedVisibility(
                 visible = isDraggingBrightness,
                 enter = fadeIn(),
                 exit = fadeOut(),
-                modifier = Modifier.align(Alignment.Center)
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offset(y = (-90).dp)
             ) {
                 val pct = (brightness * 100).roundToInt()
                 Box(
