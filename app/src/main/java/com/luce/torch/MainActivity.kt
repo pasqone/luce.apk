@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -94,8 +95,17 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Immersive fullscreen edge-to-edge
+        // Immersive fullscreen edge-to-edge into display cutout / notch
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.attributes.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
         hideSystemBars()
 
         // Keep screen awake
@@ -188,6 +198,13 @@ class MainActivity : ComponentActivity() {
             setTorch(true)
         } else {
             applyScreenBrightness(lastDisplayBrightness)
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            hideSystemBars()
         }
     }
 
@@ -554,11 +571,11 @@ fun LuceApp(
             }
         }
 
-        // Lock Icon (Bottom-Start / unten links)
+        // Lock Icon (Bottom-End / unten rechts)
         Box(
             modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(bottom = 36.dp, start = 20.dp)
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 36.dp, end = 20.dp)
         ) {
             IconButton(
                 onClick = {

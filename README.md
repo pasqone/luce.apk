@@ -19,7 +19,7 @@ A minimalist, distraction-free, privacy-first ambient display light and LED torc
   - **Saturation** slider ($0\%$–$100\%$) for everything from crisp white to deep vivid colors.
   - Linked **Brightness** slider synchronized with the swipe gesture.
 - **4 Customizable Presets:** Quickly switch between favorite colors. Tap to load; long-press with haptic vibration to save the current color.
-- **UI Lock:** Dedicated lock button (bottom-left) prevents accidental gestures while holding the phone or using it as a nightlight.
+- **UI Lock:** Dedicated lock button (bottom-right) prevents accidental gestures while holding the phone or using it as a nightlight.
 
 ### 🔦 Mode B: Hardware LED Torch
 - **Instant Double-Tap:** Double-tap anywhere on the display to toggle the rear camera LED flashlight—even when the screen is locked.
@@ -40,7 +40,7 @@ A minimalist, distraction-free, privacy-first ambient display light and LED torc
 | **Double Tap** | Toggle between Display Lamp (Mode A) and LED Torch (Mode B) / Stop SOS |
 | **Tap Screen** | Dismiss color palette overlay |
 | **Top-Left Button (`SOS`)** | Toggle Morse code emergency beacon |
-| **Bottom-Left Button (`Lock`)** | Lock / unlock screen gestures |
+| **Bottom-Right Button (`Lock`)** | Lock / unlock screen gestures |
 | **Bottom-Center Button (`Palette`)** | Open / close Hue, Saturation & Brightness picker |
 | **Preset Circle (Tap)** | Apply saved color preset |
 | **Preset Circle (Long Press)** | Save current color into preset slot (with haptic feedback) |
