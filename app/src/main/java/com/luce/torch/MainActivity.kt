@@ -29,13 +29,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Palette
@@ -83,7 +88,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-data class ColorPreset(val hue: Float, val saturation: Float)
+data class ColorPreset(val hue: Float, val saturation: Float, val brightness: Float)
 
 class MainActivity : ComponentActivity() {
 
@@ -242,6 +247,9 @@ fun LuceApp(
     // Color picker visibility
     var showColorPicker by remember { mutableStateOf(false) }
 
+    // Info & Guide dialog visibility
+    var showInfoMenu by remember { mutableStateOf(false) }
+
     // Drag brightness indicator
     var isDraggingBrightness by remember { mutableStateOf(false) }
     var hideBrightnessJob by remember { mutableStateOf<Job?>(null) }
@@ -252,19 +260,23 @@ fun LuceApp(
         mutableStateListOf(
             ColorPreset(
                 prefs.getFloat("preset_0_hue", 0f),
-                prefs.getFloat("preset_0_sat", 0.0f)
+                prefs.getFloat("preset_0_sat", 0.0f),
+                prefs.getFloat("preset_0_bri", 0.8f)
             ),
             ColorPreset(
                 prefs.getFloat("preset_1_hue", 35f),
-                prefs.getFloat("preset_1_sat", 0.45f)
+                prefs.getFloat("preset_1_sat", 0.45f),
+                prefs.getFloat("preset_1_bri", 0.8f)
             ),
             ColorPreset(
                 prefs.getFloat("preset_2_hue", 22f),
-                prefs.getFloat("preset_2_sat", 0.85f)
+                prefs.getFloat("preset_2_sat", 0.85f),
+                prefs.getFloat("preset_2_bri", 0.8f)
             ),
             ColorPreset(
                 prefs.getFloat("preset_3_hue", 0f),
-                prefs.getFloat("preset_3_sat", 1.0f)
+                prefs.getFloat("preset_3_sat", 1.0f),
+                prefs.getFloat("preset_3_bri", 0.8f)
             )
         )
     }
@@ -319,10 +331,11 @@ fun LuceApp(
     }
 
     fun savePreset(index: Int) {
-        presets[index] = ColorPreset(hue, saturation)
+        presets[index] = ColorPreset(hue, saturation, brightness)
         prefs.edit()
             .putFloat("preset_${index}_hue", hue)
             .putFloat("preset_${index}_sat", saturation)
+            .putFloat("preset_${index}_bri", brightness)
             .apply()
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         savedPresetIndex = index
@@ -338,9 +351,12 @@ fun LuceApp(
         val p = presets[index]
         hue = p.hue
         saturation = p.saturation
+        brightness = p.brightness
+        onBrightnessChange(p.brightness)
         prefs.edit()
             .putFloat("current_hue", hue)
             .putFloat("current_saturation", saturation)
+            .putFloat("current_brightness", p.brightness)
             .apply()
     }
 
@@ -352,6 +368,7 @@ fun LuceApp(
         isModeB = next
         if (next) {
             showColorPicker = false
+            showInfoMenu = false
         }
         onModeBChange(next)
     }
@@ -361,6 +378,7 @@ fun LuceApp(
         isSosActive = next
         if (next) {
             showColorPicker = false
+            showInfoMenu = false
         }
     }
 
@@ -384,11 +402,14 @@ fun LuceApp(
         modifier = Modifier
             .fillMaxSize()
             .background(backgroundColor)
-            .pointerInput(isLocked, isModeB, isSosActive, showColorPicker) {
+            .pointerInput(isLocked, isModeB, isSosActive, showColorPicker, showInfoMenu) {
                 detectTapGestures(
                     onTap = {
                         if (showColorPicker) {
                             showColorPicker = false
+                        }
+                        if (showInfoMenu) {
+                            showInfoMenu = false
                         }
                     },
                     onDoubleTap = {
@@ -396,7 +417,7 @@ fun LuceApp(
                             isSosActive = false
                         } else if (isModeB) {
                             toggleModeB()
-                        } else if (!showColorPicker) {
+                        } else if (!showColorPicker && !showInfoMenu) {
                             toggleModeB()
                         }
                     }
@@ -474,12 +495,23 @@ fun LuceApp(
                 }
             }
 
-            // Bottom controls: Color Picker Button & Overlay
+            // Bottom controls: Color Picker Button & Overlays
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
             ) {
+                // Info & Guide Overlay Sheet
+                AnimatedVisibility(
+                    visible = showInfoMenu && !isLocked,
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    InfoGuideCard(
+                        onDismiss = { showInfoMenu = false }
+                    )
+                }
+
                 // Color Picker Overlay Sheet
                 AnimatedVisibility(
                     visible = showColorPicker && !isLocked,
@@ -519,7 +551,13 @@ fun LuceApp(
                         contentAlignment = Alignment.Center
                     ) {
                         IconButton(
-                            onClick = { showColorPicker = !showColorPicker },
+                            onClick = {
+                                val next = !showColorPicker
+                                showColorPicker = next
+                                if (next) {
+                                    showInfoMenu = false
+                                }
+                            },
                             modifier = Modifier
                                 .size(50.dp)
                                 .clip(CircleShape)
@@ -534,6 +572,37 @@ fun LuceApp(
                             )
                         }
                     }
+                }
+            }
+        }
+
+        // Info Icon (Bottom-Start / unten links - only when unlocked and in Mode A)
+        if (!isLocked && !isModeB && !isSosActive) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(bottom = 36.dp, start = 20.dp)
+            ) {
+                IconButton(
+                    onClick = {
+                        val next = !showInfoMenu
+                        showInfoMenu = next
+                        if (next) {
+                            showColorPicker = false
+                        }
+                    },
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Info & Instructions",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
             }
         }
@@ -584,6 +653,7 @@ fun LuceApp(
                     prefs.edit().putBoolean("is_locked", nextLock).apply()
                     if (nextLock) {
                         showColorPicker = false
+                        showInfoMenu = false
                     }
                 },
                 modifier = Modifier
@@ -836,6 +906,153 @@ fun ColorPickerCard(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun InfoGuideCard(
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color(0xE6181818))
+            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(24.dp))
+            .pointerInput(Unit) {
+                detectTapGestures { }
+            }
+            .padding(20.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 460.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Luce",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "v1.0",
+                        color = Color(0xFFAAAAAA),
+                        fontSize = 13.sp
+                    )
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = Color(0xFFAAAAAA),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // Quick Guide Section
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "QUICK GUIDE",
+                    color = Color(0xFFCCCCCC),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+                GuideItem(icon = "↕", title = "Brightness Gesture", desc = "Drag vertically anywhere to adjust light level (1%–100%). Fine control below 25%.")
+                GuideItem(icon = "👆", title = "Double-Tap Switch", desc = "Switch between Display Lamp (Mode A) and Camera LED Torch (Mode B).")
+                GuideItem(icon = "🎨", title = "Color Picker", desc = "Tap the palette button to adjust hue, saturation, and brightness.")
+                GuideItem(icon = "💾", title = "Preset Slots", desc = "Tap a slot to load color & brightness. Long-press to save current settings.")
+                GuideItem(icon = "🔒", title = "Screen Lock", desc = "Tap bottom-right to lock touch gestures for undisturbed night use.")
+                GuideItem(icon = "🆘", title = "Morse SOS", desc = "Tap top-left to flash international Morse code (... --- ...) via screen and LED.")
+            }
+
+            // Divider
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Color.White.copy(alpha = 0.12f))
+            )
+
+            // About Section
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "ABOUT",
+                    color = Color(0xFFCCCCCC),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = "Creator", color = Color(0xFFAAAAAA), fontSize = 13.sp)
+                    Text(text = "pasq.org", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = "License", color = Color(0xFFAAAAAA), fontSize = 13.sp)
+                    Text(text = "GNU GPL v3.0", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = "Privacy", color = Color(0xFFAAAAAA), fontSize = 13.sp)
+                    Text(text = "100% Offline • No Tracking", color = Color(0xFF81C784), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GuideItem(icon: String, title: String, desc: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = icon,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(top = 1.dp)
+        )
+        Column {
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = desc,
+                color = Color(0xFFAAAAAA),
+                fontSize = 12.sp,
+                lineHeight = 16.sp
+            )
         }
     }
 }

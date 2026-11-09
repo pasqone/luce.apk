@@ -18,8 +18,9 @@ A minimalist, distraction-free, privacy-first ambient display light and LED torc
   - Smooth **Hue** slider ($0^\circ$–$360^\circ$).
   - **Saturation** slider ($0\%$–$100\%$) for everything from crisp white to deep vivid colors.
   - Linked **Brightness** slider synchronized with the swipe gesture.
-- **4 Customizable Presets:** Quickly switch between favorite colors. Tap to load; long-press with haptic vibration to save the current color.
+- **4 Customizable Presets:** Quickly switch between favorite colors and light levels. Tap to load color & brightness; long-press with haptic vibration to save current color and brightness.
 - **UI Lock:** Dedicated lock button (bottom-right) prevents accidental gestures while holding the phone or using it as a nightlight.
+- **Info & Instructions:** Quick guide button (bottom-left) explains all gestures, author information (pasq.org), and license.
 
 ### 🔦 Mode B: Hardware LED Torch
 - **Instant Double-Tap:** Double-tap anywhere on the display to toggle the rear camera LED flashlight—even when the screen is locked.
@@ -38,12 +39,13 @@ A minimalist, distraction-free, privacy-first ambient display light and LED torc
 |---|---|
 | **Vertical Drag** | Adjust display brightness smoothly |
 | **Double Tap** | Toggle between Display Lamp (Mode A) and LED Torch (Mode B) / Stop SOS |
-| **Tap Screen** | Dismiss color palette overlay |
+| **Tap Screen** | Dismiss color palette or info overlay |
 | **Top-Left Button (`SOS`)** | Toggle Morse code emergency beacon |
-| **Bottom-Right Button (`Lock`)** | Lock / unlock screen gestures |
+| **Bottom-Left Button (`Info`)** | Open quick guide & about dialog (gestures, pasq.org, GPL-3.0) |
 | **Bottom-Center Button (`Palette`)** | Open / close Hue, Saturation & Brightness picker |
-| **Preset Circle (Tap)** | Apply saved color preset |
-| **Preset Circle (Long Press)** | Save current color into preset slot (with haptic feedback) |
+| **Bottom-Right Button (`Lock`)** | Lock / unlock screen gestures |
+| **Preset Circle (Tap)** | Apply saved color & brightness preset |
+| **Preset Circle (Long Press)** | Save current color & brightness into slot (with haptic feedback) |
 
 ---
 
