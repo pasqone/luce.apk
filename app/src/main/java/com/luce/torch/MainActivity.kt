@@ -2,7 +2,7 @@ package com.luce.torch
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.hardware.camera2.CameraAccessException
+import android.content.pm.ActivityInfo
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
@@ -23,6 +23,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -39,27 +40,34 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,13 +78,16 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -86,9 +97,17 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.Locale
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 data class ColorPreset(val hue: Float, val saturation: Float, val brightness: Float)
+
+enum class TextMode {
+    OFF,
+    BANNER,
+    SLIDESHOW
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -144,8 +163,22 @@ class MainActivity : ComponentActivity() {
                 },
                 onApplyBrightness = { b ->
                     applyScreenBrightness(b)
+                },
+                onUpdateOrientation = { isLandscape ->
+                    setScreenOrientation(isLandscape)
                 }
             )
+        }
+    }
+
+    private fun setScreenOrientation(isLandscape: Boolean) {
+        val target = if (isLandscape) {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+        if (requestedOrientation != target) {
+            requestedOrientation = target
         }
     }
 
@@ -229,25 +262,48 @@ fun LuceApp(
     onBrightnessChange: (Float) -> Unit,
     onModeBChange: (Boolean) -> Unit,
     onSetTorch: (Boolean) -> Unit,
-    onApplyBrightness: (Float) -> Unit
+    onApplyBrightness: (Float) -> Unit,
+    onUpdateOrientation: (Boolean) -> Unit
 ) {
     // Mode A vs Mode B (always starts in Mode A per SPEC)
     var isModeB by remember { mutableStateOf(false) }
 
-    // Persistent state
+    // Persistent state: Color & Brightness
     var hue by remember { mutableFloatStateOf(prefs.getFloat("current_hue", 35f)) }
     var saturation by remember { mutableFloatStateOf(prefs.getFloat("current_saturation", 0.0f)) }
     var brightness by remember { mutableFloatStateOf(prefs.getFloat("current_brightness", 0.8f).coerceIn(0.01f, 1.0f)) }
     var isLocked by remember { mutableStateOf(prefs.getBoolean("is_locked", false)) }
 
+    // Persistent state: Text Modes
+    val savedTextModeName = prefs.getString("text_mode", TextMode.OFF.name) ?: TextMode.OFF.name
+    var textMode by remember {
+        mutableStateOf(
+            try {
+                TextMode.valueOf(savedTextModeName)
+            } catch (_: Exception) {
+                TextMode.OFF
+            }
+        )
+    }
+    var bannerText by remember { mutableStateOf(prefs.getString("banner_text", "LUCE") ?: "LUCE") }
+    var bannerSpeed by remember { mutableFloatStateOf(prefs.getFloat("banner_speed", 0.5f)) }
+    var slideshowText by remember { mutableStateOf(prefs.getString("slideshow_text", "HALLO WELT") ?: "HALLO WELT") }
+    var slideshowDelayMs by remember { mutableLongStateOf(prefs.getLong("slideshow_delay_ms", 1000L)) }
+    var slideshowInverted by remember { mutableStateOf(prefs.getBoolean("slideshow_inverted", false)) }
+
+    // Reactively update screen orientation
+    LaunchedEffect(textMode, isModeB) {
+        val shouldBeLandscape = !isModeB && (textMode == TextMode.BANNER || textMode == TextMode.SLIDESHOW)
+        onUpdateOrientation(shouldBeLandscape)
+    }
+
     // SOS State
     var isSosActive by remember { mutableStateOf(false) }
     var isSosFlashOn by remember { mutableStateOf(false) }
 
-    // Color picker visibility
+    // Overlay visibilities
     var showColorPicker by remember { mutableStateOf(false) }
-
-    // Info & Guide dialog visibility
+    var showTextSettings by remember { mutableStateOf(false) }
     var showInfoMenu by remember { mutableStateOf(false) }
 
     // Drag brightness indicator
@@ -368,6 +424,7 @@ fun LuceApp(
         isModeB = next
         if (next) {
             showColorPicker = false
+            showTextSettings = false
             showInfoMenu = false
         }
         onModeBChange(next)
@@ -378,6 +435,7 @@ fun LuceApp(
         isSosActive = next
         if (next) {
             showColorPicker = false
+            showTextSettings = false
             showInfoMenu = false
         }
     }
@@ -390,34 +448,38 @@ fun LuceApp(
         1.0f
     }
 
+    val activeDisplayColor = Color.hsv(hue, saturation, colorValue)
+    val fullBrightColor = Color.hsv(hue, saturation, 1.0f)
+
     val backgroundColor = if (isSosActive) {
         if (isSosFlashOn) Color(0xFF0055FF) else Color.Black
     } else if (isModeB) {
         Color.Black
+    } else if (textMode == TextMode.BANNER) {
+        Color.Black
+    } else if (textMode == TextMode.SLIDESHOW) {
+        if (slideshowInverted) activeDisplayColor else Color.Black
     } else {
-        Color.hsv(hue, saturation, colorValue)
+        activeDisplayColor
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(backgroundColor)
-            .pointerInput(isLocked, isModeB, isSosActive, showColorPicker, showInfoMenu) {
+            .pointerInput(isLocked, isModeB, isSosActive, showColorPicker, showTextSettings, showInfoMenu) {
                 detectTapGestures(
                     onTap = {
-                        if (showColorPicker) {
-                            showColorPicker = false
-                        }
-                        if (showInfoMenu) {
-                            showInfoMenu = false
-                        }
+                        if (showColorPicker) showColorPicker = false
+                        if (showTextSettings) showTextSettings = false
+                        if (showInfoMenu) showInfoMenu = false
                     },
                     onDoubleTap = {
                         if (isSosActive) {
                             isSosActive = false
                         } else if (isModeB) {
                             toggleModeB()
-                        } else if (!showColorPicker && !showInfoMenu) {
+                        } else if (!showColorPicker && !showTextSettings && !showInfoMenu) {
                             toggleModeB()
                         }
                     }
@@ -441,9 +503,7 @@ fun LuceApp(
                         isDraggingBrightness = false
                     },
                     onVerticalDrag = { _, dragAmount ->
-                        // Upwards drag is negative in y-axis -> increases brightness
                         val sensitivity = 0.70f * screenHeightPx
-                        // Fine-grained control in the low brightness range (1% to 25%)
                         val precisionScale = if (brightness < 0.25f) {
                             0.30f + (brightness / 0.25f) * 0.70f
                         } else {
@@ -468,7 +528,27 @@ fun LuceApp(
                 HardwareTorchCenterGraphic()
             }
         } else if (!isModeB && !isSosActive) {
-            // Mode A: Display Light Mode
+            // Mode A: Display Light / Text Modes
+            when (textMode) {
+                TextMode.BANNER -> {
+                    BannerLedMarquee(
+                        text = bannerText,
+                        speed = bannerSpeed,
+                        color = fullBrightColor
+                    )
+                }
+                TextMode.SLIDESHOW -> {
+                    SlideshowWordDisplay(
+                        text = slideshowText,
+                        delayMs = slideshowDelayMs,
+                        isInverted = slideshowInverted,
+                        color = fullBrightColor
+                    )
+                }
+                TextMode.OFF -> {
+                    // Standard pure fullscreen display lamp
+                }
+            }
 
             // Brightness percentage indicator while dragging (lifted above finger area)
             AnimatedVisibility(
@@ -495,7 +575,7 @@ fun LuceApp(
                 }
             }
 
-            // Bottom controls: Color Picker Button & Overlays
+            // Bottom controls: Action Row & Overlays
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -542,31 +622,105 @@ fun LuceApp(
                     )
                 }
 
-                // Color Picker Toggle Button (Bottom-Center, hidden when locked)
+                // Text Settings Overlay Sheet
+                AnimatedVisibility(
+                    visible = showTextSettings && !isLocked,
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    TextSettingsCard(
+                        textMode = textMode,
+                        onTextModeChange = { newMode ->
+                            textMode = newMode
+                            prefs.edit().putString("text_mode", newMode.name).apply()
+                        },
+                        bannerText = bannerText,
+                        onBannerTextChange = { newText ->
+                            bannerText = newText
+                            prefs.edit().putString("banner_text", newText).apply()
+                        },
+                        bannerSpeed = bannerSpeed,
+                        onBannerSpeedChange = { newSpeed ->
+                            bannerSpeed = newSpeed
+                            prefs.edit().putFloat("banner_speed", newSpeed).apply()
+                        },
+                        slideshowText = slideshowText,
+                        onSlideshowTextChange = { newText ->
+                            slideshowText = newText
+                            prefs.edit().putString("slideshow_text", newText).apply()
+                        },
+                        slideshowDelayMs = slideshowDelayMs,
+                        onSlideshowDelayMsChange = { newDelay ->
+                            slideshowDelayMs = newDelay
+                            prefs.edit().putLong("slideshow_delay_ms", newDelay).apply()
+                        },
+                        slideshowInverted = slideshowInverted,
+                        onSlideshowInvertedChange = { newInverted ->
+                            slideshowInverted = newInverted
+                            prefs.edit().putBoolean("slideshow_inverted", newInverted).apply()
+                        },
+                        onDismiss = { showTextSettings = false }
+                    )
+                }
+
+                // Bottom Action Row: Color Picker & Text Mode buttons (hidden when locked)
                 if (!isLocked) {
-                    Box(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 36.dp, top = 8.dp),
-                        contentAlignment = Alignment.Center
+                        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Color Picker Toggle Button
                         IconButton(
                             onClick = {
                                 val next = !showColorPicker
                                 showColorPicker = next
                                 if (next) {
                                     showInfoMenu = false
+                                    showTextSettings = false
                                 }
                             },
                             modifier = Modifier
                                 .size(50.dp)
                                 .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.35f))
+                                .background(
+                                    if (showColorPicker) Color.White.copy(alpha = 0.28f)
+                                    else Color.Black.copy(alpha = 0.35f)
+                                )
                                 .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Palette,
                                 contentDescription = "Color Picker",
+                                tint = Color.White,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+
+                        // Text Mode Toggle Button (T)
+                        IconButton(
+                            onClick = {
+                                val next = !showTextSettings
+                                showTextSettings = next
+                                if (next) {
+                                    showColorPicker = false
+                                    showInfoMenu = false
+                                }
+                            },
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (showTextSettings || textMode != TextMode.OFF) Color.White.copy(alpha = 0.28f)
+                                    else Color.Black.copy(alpha = 0.35f)
+                                )
+                                .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.TextFields,
+                                contentDescription = "Text Modes",
                                 tint = Color.White,
                                 modifier = Modifier.size(26.dp)
                             )
@@ -589,6 +743,7 @@ fun LuceApp(
                         showInfoMenu = next
                         if (next) {
                             showColorPicker = false
+                            showTextSettings = false
                         }
                     },
                     modifier = Modifier
@@ -653,6 +808,7 @@ fun LuceApp(
                     prefs.edit().putBoolean("is_locked", nextLock).apply()
                     if (nextLock) {
                         showColorPicker = false
+                        showTextSettings = false
                         showInfoMenu = false
                     }
                 },
@@ -668,6 +824,496 @@ fun LuceApp(
                     tint = Color.White,
                     modifier = Modifier.size(24.dp)
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Authentic LED Dot-Matrix Marquee with Neon Halo Glow and OLED Black background.
+ */
+@Composable
+fun BannerLedMarquee(
+    text: String,
+    speed: Float,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    val displayText = remember(text) {
+        val t = text.trim()
+        if (t.isEmpty()) "LUCE" else t
+    }
+    val loopText = remember(displayText) { "$displayText   •   " }
+
+    val dotPitchPx = with(LocalDensity.current) { 10.dp.toPx() }.roundToInt().coerceAtLeast(8)
+    val dotRadiusPx = dotPitchPx * 0.36f
+
+    val (unlitShader, maskShader) = remember(dotPitchPx) {
+        // 1. Unlit diodes background shader
+        val unlitBm = android.graphics.Bitmap.createBitmap(dotPitchPx, dotPitchPx, android.graphics.Bitmap.Config.ARGB_8888)
+        val unlitCanvas = android.graphics.Canvas(unlitBm)
+        unlitCanvas.drawColor(android.graphics.Color.BLACK)
+        val unlitPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = android.graphics.Color.argb(255, 18, 18, 18)
+            style = android.graphics.Paint.Style.FILL
+        }
+        unlitCanvas.drawCircle(dotPitchPx / 2f, dotPitchPx / 2f, dotRadiusPx, unlitPaint)
+        val s1 = android.graphics.BitmapShader(unlitBm, android.graphics.Shader.TileMode.REPEAT, android.graphics.Shader.TileMode.REPEAT)
+
+        // 2. Perforated mask shader (black bezel, transparent aperture)
+        val maskBm = android.graphics.Bitmap.createBitmap(dotPitchPx, dotPitchPx, android.graphics.Bitmap.Config.ARGB_8888)
+        val maskCanvas = android.graphics.Canvas(maskBm)
+        maskCanvas.drawColor(android.graphics.Color.BLACK)
+        val clearPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
+        }
+        maskCanvas.drawCircle(dotPitchPx / 2f, dotPitchPx / 2f, dotRadiusPx, clearPaint)
+        val s2 = android.graphics.BitmapShader(maskBm, android.graphics.Shader.TileMode.REPEAT, android.graphics.Shader.TileMode.REPEAT)
+
+        Pair(s1, s2)
+    }
+
+    val unlitShaderPaint = remember(unlitShader) {
+        android.graphics.Paint().apply {
+            shader = unlitShader
+        }
+    }
+
+    val maskShaderPaint = remember(maskShader) {
+        android.graphics.Paint().apply {
+            shader = maskShader
+        }
+    }
+
+    val androidColor = remember(color) {
+        android.graphics.Color.argb(
+            255,
+            (color.red * 255).roundToInt(),
+            (color.green * 255).roundToInt(),
+            (color.blue * 255).roundToInt()
+        )
+    }
+
+    var scrollOffset by remember { mutableFloatStateOf(0f) }
+    var measuredTextWidth by remember { mutableFloatStateOf(1000f) }
+
+    val density = LocalDensity.current
+    val speedPxPerSec = remember(speed, density) {
+        with(density) { (70.dp + (380.dp * speed)).toPx() }
+    }
+
+    LaunchedEffect(loopText, speedPxPerSec, measuredTextWidth) {
+        var lastNano = 0L
+        while (isActive) {
+            withFrameNanos { now ->
+                if (lastNano != 0L) {
+                    val dt = (now - lastNano) / 1_000_000_000f
+                    val w = measuredTextWidth.coerceAtLeast(10f)
+                    scrollOffset = (scrollOffset + speedPxPerSec * dt) % w
+                }
+                lastNano = now
+            }
+        }
+    }
+
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
+        if (w <= 0f || h <= 0f) return@Canvas
+
+        val targetTextSize = h * 0.74f
+
+        val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = androidColor
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+            textSize = targetTextSize
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = 14.dp.toPx()
+            strokeCap = android.graphics.Paint.Cap.ROUND
+            strokeJoin = android.graphics.Paint.Join.ROUND
+            alpha = 110
+            setShadowLayer(22.dp.toPx(), 0f, 0f, androidColor)
+        }
+
+        val corePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = androidColor
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+            textSize = targetTextSize
+            style = android.graphics.Paint.Style.FILL
+            alpha = 255
+            setShadowLayer(6.dp.toPx(), 0f, 0f, androidColor)
+        }
+
+        val textWidth = corePaint.measureText(loopText).coerceAtLeast(1f)
+        if (measuredTextWidth != textWidth) {
+            measuredTextWidth = textWidth
+        }
+
+        val metrics = corePaint.fontMetrics
+        val baselineY = (h - (metrics.ascent + metrics.descent)) / 2f
+
+        drawIntoCanvas { canvas ->
+            val native = canvas.nativeCanvas
+
+            // 1. Draw unlit dot-matrix background across screen
+            native.drawRect(0f, 0f, w, h, unlitShaderPaint)
+
+            // 2. Draw scrolling text repetitions (glow + core)
+            var drawX = -scrollOffset
+            while (drawX > 0) {
+                drawX -= textWidth
+            }
+            while (drawX < w) {
+                if (drawX + textWidth > 0) {
+                    native.drawText(loopText, drawX, baselineY, glowPaint)
+                    native.drawText(loopText, drawX, baselineY, corePaint)
+                }
+                drawX += textWidth
+            }
+
+            // 3. Draw perforated diode mask overlay
+            native.drawRect(0f, 0f, w, h, maskShaderPaint)
+        }
+    }
+}
+
+/**
+ * Sequential Word-by-Word Slideshow with dynamic auto-sizing and contrast invert.
+ */
+@Composable
+fun SlideshowWordDisplay(
+    text: String,
+    delayMs: Long,
+    isInverted: Boolean,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    val words = remember(text) {
+        text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.ifEmpty { listOf("LUCE") }
+    }
+
+    var currentWordIndex by remember(words) { mutableIntStateOf(0) }
+
+    LaunchedEffect(words, delayMs) {
+        currentWordIndex = 0
+        while (isActive) {
+            delay(delayMs)
+            currentWordIndex = (currentWordIndex + 1) % words.size
+        }
+    }
+
+    val currentWord = words.getOrElse(currentWordIndex % words.size) { "LUCE" }
+
+    // Relative luminance calculation for high-contrast inverted text
+    val lum = 0.299f * color.red + 0.587f * color.green + 0.114f * color.blue
+    val wordColor = if (isInverted) {
+        if (lum > 0.45f) Color.Black else Color.White
+    } else {
+        color
+    }
+
+    BoxWithConstraints(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        val maxW = maxWidth
+        val maxH = maxHeight
+        val density = LocalDensity.current
+
+        val optimalFontSize = remember(currentWord, maxW, maxH) {
+            val targetW = with(density) { (maxW * 0.88f).toPx() }
+            val targetH = with(density) { (maxH * 0.72f).toPx() }
+
+            val paint = android.graphics.Paint().apply {
+                typeface = android.graphics.Typeface.create(
+                    android.graphics.Typeface.SANS_SERIF,
+                    android.graphics.Typeface.BOLD
+                )
+                textSize = 100f
+            }
+            val measuredW = paint.measureText(currentWord).coerceAtLeast(1f)
+            val metrics = paint.fontMetrics
+            val measuredH = (metrics.descent - metrics.ascent).coerceAtLeast(1f)
+
+            val scaleX = targetW / measuredW
+            val scaleY = targetH / measuredH
+            val bestPx = 100f * minOf(scaleX, scaleY)
+            with(density) { bestPx.toSp() }
+        }
+
+        Text(
+            text = currentWord,
+            fontSize = optimalFontSize,
+            fontWeight = FontWeight.ExtraBold,
+            fontFamily = FontFamily.SansSerif,
+            color = wordColor,
+            textAlign = TextAlign.Center,
+            letterSpacing = (-0.5).sp,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
+/**
+ * Text Settings Overlay Sheet for configuring Banner Mode and Word Slideshow Mode.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TextSettingsCard(
+    textMode: TextMode,
+    onTextModeChange: (TextMode) -> Unit,
+    bannerText: String,
+    onBannerTextChange: (String) -> Unit,
+    bannerSpeed: Float,
+    onBannerSpeedChange: (Float) -> Unit,
+    slideshowText: String,
+    onSlideshowTextChange: (String) -> Unit,
+    slideshowDelayMs: Long,
+    onSlideshowDelayMsChange: (Long) -> Unit,
+    slideshowInverted: Boolean,
+    onSlideshowInvertedChange: (Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color(0xE6181818))
+            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(24.dp))
+            .pointerInput(Unit) {
+                detectTapGestures { }
+            }
+            .padding(20.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 420.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Text Modes",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = Color(0xFFAAAAAA),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // Mode Selector Segmented Tabs
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF242424))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf(
+                    TextMode.OFF to "Off",
+                    TextMode.BANNER to "Banner",
+                    TextMode.SLIDESHOW to "Slideshow"
+                ).forEach { (mode, label) ->
+                    val isSelected = textMode == mode
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSelected) Color.White else Color.Transparent)
+                            .clickable { onTextModeChange(mode) }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (isSelected) Color.Black else Color(0xFFAAAAAA),
+                            fontSize = 13.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
+            // Mode Content
+            when (textMode) {
+                TextMode.BANNER -> {
+                    // Text Input with Clear button
+                    OutlinedTextField(
+                        value = bannerText,
+                        onValueChange = onBannerTextChange,
+                        label = { Text("Banner Text", color = Color(0xFFAAAAAA)) },
+                        placeholder = { Text("Enter text...", color = Color(0xFF666666)) },
+                        singleLine = true,
+                        trailingIcon = {
+                            if (bannerText.isNotEmpty()) {
+                                IconButton(onClick = { onBannerTextChange("") }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = "Clear",
+                                        tint = Color(0xFFAAAAAA)
+                                    )
+                                }
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color.White,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
+                            cursorColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Speed Slider
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Scroll Speed",
+                                color = Color(0xFFDDDDDD),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = when {
+                                    bannerSpeed < 0.35f -> "Slow"
+                                    bannerSpeed > 0.65f -> "Fast"
+                                    else -> "Normal"
+                                },
+                                color = Color(0xFFAAAAAA),
+                                fontSize = 13.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Slider(
+                            value = bannerSpeed,
+                            onValueChange = onBannerSpeedChange,
+                            valueRange = 0.1f..1.0f,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                TextMode.SLIDESHOW -> {
+                    // Text Input with Clear button
+                    OutlinedTextField(
+                        value = slideshowText,
+                        onValueChange = onSlideshowTextChange,
+                        label = { Text("Slideshow Text", color = Color(0xFFAAAAAA)) },
+                        placeholder = { Text("Enter words...", color = Color(0xFF666666)) },
+                        trailingIcon = {
+                            if (slideshowText.isNotEmpty()) {
+                                IconButton(onClick = { onSlideshowTextChange("") }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = "Clear",
+                                        tint = Color(0xFFAAAAAA)
+                                    )
+                                }
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color.White,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
+                            cursorColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Word Delay Slider
+                    val delaySec = slideshowDelayMs / 1000f
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Word Delay",
+                                color = Color(0xFFDDDDDD),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = String.format(Locale.US, "%.1fs", delaySec),
+                                color = Color(0xFFAAAAAA),
+                                fontSize = 13.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Slider(
+                            value = delaySec,
+                            onValueChange = { newSec ->
+                                onSlideshowDelayMsChange((newSec * 1000f).roundToLong().coerceIn(200L, 5000L))
+                            },
+                            valueRange = 0.2f..5.0f,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    // Invert Toggle Switch
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Invert Colors",
+                                color = Color(0xFFDDDDDD),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = if (slideshowInverted) "Contrast text on colored background" else "Colored text on black background",
+                                color = Color(0xFFAAAAAA),
+                                fontSize = 11.sp
+                            )
+                        }
+                        Switch(
+                            checked = slideshowInverted,
+                            onCheckedChange = onSlideshowInvertedChange,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF4CAF50),
+                                uncheckedThumbColor = Color(0xFFAAAAAA),
+                                uncheckedTrackColor = Color(0xFF333333)
+                            )
+                        )
+                    }
+                }
+
+                TextMode.OFF -> {
+                    Text(
+                        text = "Standard display lamp active. Select Banner or Slideshow to show glowing text automatically in landscape orientation.",
+                        color = Color(0xFFAAAAAA),
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+                }
             }
         }
     }
@@ -733,6 +1379,10 @@ fun ColorPickerCard(
             .padding(20.dp)
     ) {
         Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 420.dp)
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -929,7 +1579,7 @@ fun InfoGuideCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 460.dp)
+                .heightIn(max = 440.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -950,7 +1600,7 @@ fun InfoGuideCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "v1.0",
+                        text = "v2.0",
                         color = Color(0xFFAAAAAA),
                         fontSize = 13.sp
                     )
@@ -980,6 +1630,7 @@ fun InfoGuideCard(
                 GuideItem(icon = "↕", title = "Brightness Gesture", desc = "Drag vertically anywhere to adjust light level (1%–100%). Fine control below 25%.")
                 GuideItem(icon = "👆", title = "Double-Tap Switch", desc = "Switch between Display Lamp (Mode A) and Camera LED Torch (Mode B).")
                 GuideItem(icon = "🎨", title = "Color Picker", desc = "Tap the palette button to adjust hue, saturation, and brightness.")
+                GuideItem(icon = "🔤", title = "LED Banner & Slideshow", desc = "Tap the 'T' button for continuous LED dot-matrix marquee or word flasher in landscape.")
                 GuideItem(icon = "💾", title = "Preset Slots", desc = "Tap a slot to load color & brightness. Long-press to save current settings.")
                 GuideItem(icon = "🔒", title = "Screen Lock", desc = "Tap bottom-right to lock touch gestures for undisturbed night use.")
                 GuideItem(icon = "🆘", title = "Morse SOS", desc = "Tap top-left to flash international Morse code (... --- ...) via screen and LED.")
