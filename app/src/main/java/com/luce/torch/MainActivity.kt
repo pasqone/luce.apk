@@ -2,7 +2,6 @@ package com.luce.torch
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.content.pm.ActivityInfo
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
@@ -10,6 +9,7 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.content.res.ResourcesCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -83,6 +83,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
@@ -163,22 +164,8 @@ class MainActivity : ComponentActivity() {
                 },
                 onApplyBrightness = { b ->
                     applyScreenBrightness(b)
-                },
-                onUpdateOrientation = { isLandscape ->
-                    setScreenOrientation(isLandscape)
                 }
             )
-        }
-    }
-
-    private fun setScreenOrientation(isLandscape: Boolean) {
-        val target = if (isLandscape) {
-            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        } else {
-            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }
-        if (requestedOrientation != target) {
-            requestedOrientation = target
         }
     }
 
@@ -262,8 +249,7 @@ fun LuceApp(
     onBrightnessChange: (Float) -> Unit,
     onModeBChange: (Boolean) -> Unit,
     onSetTorch: (Boolean) -> Unit,
-    onApplyBrightness: (Float) -> Unit,
-    onUpdateOrientation: (Boolean) -> Unit
+    onApplyBrightness: (Float) -> Unit
 ) {
     // Mode A vs Mode B (always starts in Mode A per SPEC)
     var isModeB by remember { mutableStateOf(false) }
@@ -290,12 +276,6 @@ fun LuceApp(
     var slideshowText by remember { mutableStateOf(prefs.getString("slideshow_text", "HALLO WELT") ?: "HALLO WELT") }
     var slideshowDelayMs by remember { mutableLongStateOf(prefs.getLong("slideshow_delay_ms", 1000L)) }
     var slideshowInverted by remember { mutableStateOf(prefs.getBoolean("slideshow_inverted", false)) }
-
-    // Reactively update screen orientation
-    LaunchedEffect(textMode, isModeB) {
-        val shouldBeLandscape = !isModeB && (textMode == TextMode.BANNER || textMode == TextMode.SLIDESHOW)
-        onUpdateOrientation(shouldBeLandscape)
-    }
 
     // SOS State
     var isSosActive by remember { mutableStateOf(false) }
@@ -839,51 +819,21 @@ fun BannerLedMarquee(
     color: Color,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val ledTypeface = remember(context) {
+        try {
+            ResourcesCompat.getFont(context, R.font.dotmatrix)
+                ?: android.graphics.Typeface.MONOSPACE
+        } catch (_: Exception) {
+            android.graphics.Typeface.MONOSPACE
+        }
+    }
+
     val displayText = remember(text) {
         val t = text.trim()
         if (t.isEmpty()) "LUCE" else t
     }
     val loopText = remember(displayText) { "$displayText   •   " }
-
-    val dotPitchPx = with(LocalDensity.current) { 10.dp.toPx() }.roundToInt().coerceAtLeast(8)
-    val dotRadiusPx = dotPitchPx * 0.36f
-
-    val (unlitShader, maskShader) = remember(dotPitchPx) {
-        // 1. Unlit diodes background shader
-        val unlitBm = android.graphics.Bitmap.createBitmap(dotPitchPx, dotPitchPx, android.graphics.Bitmap.Config.ARGB_8888)
-        val unlitCanvas = android.graphics.Canvas(unlitBm)
-        unlitCanvas.drawColor(android.graphics.Color.BLACK)
-        val unlitPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = android.graphics.Color.argb(255, 18, 18, 18)
-            style = android.graphics.Paint.Style.FILL
-        }
-        unlitCanvas.drawCircle(dotPitchPx / 2f, dotPitchPx / 2f, dotRadiusPx, unlitPaint)
-        val s1 = android.graphics.BitmapShader(unlitBm, android.graphics.Shader.TileMode.REPEAT, android.graphics.Shader.TileMode.REPEAT)
-
-        // 2. Perforated mask shader (black bezel, transparent aperture)
-        val maskBm = android.graphics.Bitmap.createBitmap(dotPitchPx, dotPitchPx, android.graphics.Bitmap.Config.ARGB_8888)
-        val maskCanvas = android.graphics.Canvas(maskBm)
-        maskCanvas.drawColor(android.graphics.Color.BLACK)
-        val clearPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
-        }
-        maskCanvas.drawCircle(dotPitchPx / 2f, dotPitchPx / 2f, dotRadiusPx, clearPaint)
-        val s2 = android.graphics.BitmapShader(maskBm, android.graphics.Shader.TileMode.REPEAT, android.graphics.Shader.TileMode.REPEAT)
-
-        Pair(s1, s2)
-    }
-
-    val unlitShaderPaint = remember(unlitShader) {
-        android.graphics.Paint().apply {
-            shader = unlitShader
-        }
-    }
-
-    val maskShaderPaint = remember(maskShader) {
-        android.graphics.Paint().apply {
-            shader = maskShader
-        }
-    }
 
     val androidColor = remember(color) {
         android.graphics.Color.argb(
@@ -899,7 +849,7 @@ fun BannerLedMarquee(
 
     val density = LocalDensity.current
     val speedPxPerSec = remember(speed, density) {
-        with(density) { (70.dp + (380.dp * speed)).toPx() }
+        with(density) { (60.dp + (320.dp * speed)).toPx() }
     }
 
     LaunchedEffect(loopText, speedPxPerSec, measuredTextWidth) {
@@ -921,27 +871,30 @@ fun BannerLedMarquee(
         val h = size.height
         if (w <= 0f || h <= 0f) return@Canvas
 
-        val targetTextSize = h * 0.74f
+        // Size text appropriately for portrait: ~35% of screen width
+        val targetTextSize = (w * 0.35f).coerceIn(90f, 340f)
 
+        // Pass 1: Neon bloom halo around the dots
         val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             this.color = androidColor
-            typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+            typeface = ledTypeface
             textSize = targetTextSize
-            style = android.graphics.Paint.Style.STROKE
-            strokeWidth = 14.dp.toPx()
+            style = android.graphics.Paint.Style.FILL_AND_STROKE
+            strokeWidth = 6.dp.toPx()
             strokeCap = android.graphics.Paint.Cap.ROUND
             strokeJoin = android.graphics.Paint.Join.ROUND
-            alpha = 110
-            setShadowLayer(22.dp.toPx(), 0f, 0f, androidColor)
+            alpha = 140
+            setShadowLayer(18.dp.toPx(), 0f, 0f, androidColor)
         }
 
+        // Pass 2: Crisp bright core illuminated LED diode dots
         val corePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             this.color = androidColor
-            typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+            typeface = ledTypeface
             textSize = targetTextSize
             style = android.graphics.Paint.Style.FILL
             alpha = 255
-            setShadowLayer(6.dp.toPx(), 0f, 0f, androidColor)
+            setShadowLayer(4.dp.toPx(), 0f, 0f, androidColor)
         }
 
         val textWidth = corePaint.measureText(loopText).coerceAtLeast(1f)
@@ -950,29 +903,25 @@ fun BannerLedMarquee(
         }
 
         val metrics = corePaint.fontMetrics
+        // Center vertically on screen
         val baselineY = (h - (metrics.ascent + metrics.descent)) / 2f
 
         drawIntoCanvas { canvas ->
             val native = canvas.nativeCanvas
 
-            // 1. Draw unlit dot-matrix background across screen
-            native.drawRect(0f, 0f, w, h, unlitShaderPaint)
-
-            // 2. Draw scrolling text repetitions (glow + core)
             var drawX = -scrollOffset
             while (drawX > 0) {
                 drawX -= textWidth
             }
             while (drawX < w) {
                 if (drawX + textWidth > 0) {
+                    // Glow pass
                     native.drawText(loopText, drawX, baselineY, glowPaint)
+                    // Core illuminated pass
                     native.drawText(loopText, drawX, baselineY, corePaint)
                 }
                 drawX += textWidth
             }
-
-            // 3. Draw perforated diode mask overlay
-            native.drawRect(0f, 0f, w, h, maskShaderPaint)
         }
     }
 }
@@ -1308,7 +1257,7 @@ fun TextSettingsCard(
 
                 TextMode.OFF -> {
                     Text(
-                        text = "Standard display lamp active. Select Banner or Slideshow to show glowing text automatically in landscape orientation.",
+                        text = "Standard display lamp active. Select Banner or Slideshow to show glowing text.",
                         color = Color(0xFFAAAAAA),
                         fontSize = 12.sp,
                         lineHeight = 16.sp
@@ -1630,7 +1579,7 @@ fun InfoGuideCard(
                 GuideItem(icon = "↕", title = "Brightness Gesture", desc = "Drag vertically anywhere to adjust light level (1%–100%). Fine control below 25%.")
                 GuideItem(icon = "👆", title = "Double-Tap Switch", desc = "Switch between Display Lamp (Mode A) and Camera LED Torch (Mode B).")
                 GuideItem(icon = "🎨", title = "Color Picker", desc = "Tap the palette button to adjust hue, saturation, and brightness.")
-                GuideItem(icon = "🔤", title = "LED Banner & Slideshow", desc = "Tap the 'T' button for continuous LED dot-matrix marquee or word flasher in landscape.")
+                GuideItem(icon = "🔤", title = "LED Banner & Slideshow", desc = "Tap the 'T' button for continuous LED dot-matrix marquee or word flasher.")
                 GuideItem(icon = "💾", title = "Preset Slots", desc = "Tap a slot to load color & brightness. Long-press to save current settings.")
                 GuideItem(icon = "🔒", title = "Screen Lock", desc = "Tap bottom-right to lock touch gestures for undisturbed night use.")
                 GuideItem(icon = "🆘", title = "Morse SOS", desc = "Tap top-left to flash international Morse code (... --- ...) via screen and LED.")
