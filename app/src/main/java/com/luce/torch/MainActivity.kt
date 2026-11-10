@@ -78,7 +78,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -277,7 +276,6 @@ fun LuceApp(
     var slideshowText by remember { mutableStateOf(prefs.getString("slideshow_text", "HALLO WELT") ?: "HALLO WELT") }
     var slideshowDelayMs by remember { mutableLongStateOf(prefs.getLong("slideshow_delay_ms", 1000L)) }
     var slideshowInverted by remember { mutableStateOf(prefs.getBoolean("slideshow_inverted", false)) }
-    var textFlipped by remember { mutableStateOf(prefs.getBoolean("text_flipped", false)) }
 
     // SOS State
     var isSosActive by remember { mutableStateOf(false) }
@@ -510,46 +508,25 @@ fun LuceApp(
                 HardwareTorchCenterGraphic()
             }
         } else if (!isModeB && !isSosActive) {
-            // Mode A: Display Light / Text Modes (horizontal landscape orientation across portrait screen)
-            if (textMode != TextMode.OFF) {
-                val configuration = LocalConfiguration.current
-                val screenW = configuration.screenWidthDp.dp
-                val screenH = configuration.screenHeightDp.dp
-                val longSide = maxOf(screenW, screenH)
-                val shortSide = minOf(screenW, screenH)
-                val rotationAngle = if (textFlipped) 270f else 90f
-
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(width = longSide, height = shortSide)
-                            .graphicsLayer {
-                                rotationZ = rotationAngle
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        when (textMode) {
-                            TextMode.BANNER -> {
-                                BannerLedMarquee(
-                                    text = bannerText,
-                                    speed = bannerSpeed,
-                                    color = fullBrightColor
-                                )
-                            }
-                            TextMode.SLIDESHOW -> {
-                                SlideshowWordDisplay(
-                                    text = slideshowText,
-                                    delayMs = slideshowDelayMs,
-                                    isInverted = slideshowInverted,
-                                    color = fullBrightColor
-                                )
-                            }
-                            TextMode.OFF -> { }
-                        }
-                    }
+            // Mode A: Display Light / Text Modes
+            when (textMode) {
+                TextMode.BANNER -> {
+                    BannerLedMarquee(
+                        text = bannerText,
+                        speed = bannerSpeed,
+                        color = fullBrightColor
+                    )
+                }
+                TextMode.SLIDESHOW -> {
+                    SlideshowWordDisplay(
+                        text = slideshowText,
+                        delayMs = slideshowDelayMs,
+                        isInverted = slideshowInverted,
+                        color = fullBrightColor
+                    )
+                }
+                TextMode.OFF -> {
+                    // Standard pure fullscreen display lamp
                 }
             }
 
@@ -661,11 +638,6 @@ fun LuceApp(
                         onSlideshowInvertedChange = { newInverted ->
                             slideshowInverted = newInverted
                             prefs.edit().putBoolean("slideshow_inverted", newInverted).apply()
-                        },
-                        textFlipped = textFlipped,
-                        onTextFlippedChange = { newFlipped ->
-                            textFlipped = newFlipped
-                            prefs.edit().putBoolean("text_flipped", newFlipped).apply()
                         },
                         onDismiss = { showTextSettings = false }
                     )
@@ -877,7 +849,7 @@ fun BannerLedMarquee(
 
     val density = LocalDensity.current
     val speedPxPerSec = remember(speed, density) {
-        with(density) { (90.dp + (450.dp * speed)).toPx() }
+        with(density) { (60.dp + (320.dp * speed)).toPx() }
     }
 
     LaunchedEffect(loopText, speedPxPerSec, measuredTextWidth) {
@@ -899,8 +871,8 @@ fun BannerLedMarquee(
         val h = size.height
         if (w <= 0f || h <= 0f) return@Canvas
 
-        // Size text to fill ~60% of the short axis (width of phone)
-        val targetTextSize = h * 0.60f
+        // Size text appropriately for portrait: ~35% of screen width
+        val targetTextSize = (w * 0.35f).coerceIn(90f, 340f)
 
         // Pass 1: Neon bloom halo around the dots
         val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
@@ -912,7 +884,7 @@ fun BannerLedMarquee(
             strokeCap = android.graphics.Paint.Cap.ROUND
             strokeJoin = android.graphics.Paint.Join.ROUND
             alpha = 140
-            setShadowLayer(20.dp.toPx(), 0f, 0f, androidColor)
+            setShadowLayer(18.dp.toPx(), 0f, 0f, androidColor)
         }
 
         // Pass 2: Crisp bright core illuminated LED diode dots
@@ -1050,8 +1022,6 @@ fun TextSettingsCard(
     onSlideshowDelayMsChange: (Long) -> Unit,
     slideshowInverted: Boolean,
     onSlideshowInvertedChange: (Boolean) -> Unit,
-    textFlipped: Boolean,
-    onTextFlippedChange: (Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     Box(
@@ -1291,39 +1261,6 @@ fun TextSettingsCard(
                         color = Color(0xFFAAAAAA),
                         fontSize = 12.sp,
                         lineHeight = 16.sp
-                    )
-                }
-            }
-
-            // Flip Direction 180° toggle (available for both Banner and Slideshow)
-            if (textMode != TextMode.OFF) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "Flip 180° Direction",
-                            color = Color(0xFFDDDDDD),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = if (textFlipped) "Phone turned: Camera on Right" else "Phone turned: Camera on Left",
-                            color = Color(0xFFAAAAAA),
-                            fontSize = 11.sp
-                        )
-                    }
-                    Switch(
-                        checked = textFlipped,
-                        onCheckedChange = onTextFlippedChange,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF4CAF50),
-                            uncheckedThumbColor = Color(0xFFAAAAAA),
-                            uncheckedTrackColor = Color(0xFF333333)
-                        )
                     )
                 }
             }
